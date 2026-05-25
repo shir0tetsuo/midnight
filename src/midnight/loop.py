@@ -1,14 +1,39 @@
 import curses
 import time
 import traceback
+from .storage import BinStore
 from .bootstrap import initialize
+from typing import Union
+import numpy as np
 
 class GameLoop:
     def __init__(self, stdscr: curses.window):
         self.stdscr = stdscr
         self.running = True
-        self.gamestate = "MENU"
+        self.gamestate = "MAINMENU"
+
+        # item/entity buffers
+        self.menuobjects = []
+        self.itembuf = []
+        self.entities = []
+
         self.rows, self.cols = self._update_yx()
+
+        self.KEYSETTINGS = BinStore('keysettings', dtype=np.float16, size=6)
+        if not self.KEYSETTINGS.exists:
+            self.KEYSETTINGS.write(
+                self.KEYSETTINGS.formatted(
+                    [   # UP, DOWN, LEFT, RIGHT, ENTER (A), BACKSPACE (B)
+                        curses.KEY_UP,
+                        curses.KEY_DOWN,
+                        curses.KEY_LEFT,
+                        curses.KEY_RIGHT,
+                        curses.KEY_ENTER,
+                        curses.KEY_BACKSPACE
+                    ]
+                )
+            )
+        
 
 
     # ---- This wraps curses window around new GameLoop instance ----
@@ -26,11 +51,13 @@ class GameLoop:
     # Quick check in keys for unicode key ord
     @staticmethod
     def _in_k(
-            k_ord:str, 
+            k_ord:Union[str, int, float], 
             keys:set[int]
         ):
         return (
-            True if ord(k_ord) in keys 
+            True if (
+                ord(k_ord) if isinstance(k_ord, str) else int(k_ord)
+            ) in keys 
             else False
         )
 
@@ -82,6 +109,6 @@ class GameLoop:
 
         except Exception as exc:
             self.running = False
-            print(f"\n❌ Error: {exc}")
+            print(f"\n❌ {exc}")
             traceback.print_exc()
             raise
