@@ -34,7 +34,6 @@ class PlayableNonPlayable:
         self.seed       = seed or random_float32()
         self.EntityType = EntityType  # Entity Type, affects update cycles
 
-        self._seed = random.seed(self.seed)
         pass
 
     def set_seed(self): random.seed(self.seed)
