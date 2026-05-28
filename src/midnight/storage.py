@@ -20,7 +20,7 @@ class Store:
         # Get system, path
         self._system.setdefault('system', platform.system())
         self.basepath = self.get_basepath()
-        self.path:Path = self.basepath / identifier + '.bin'
+        self.path:Path = self.basepath / f'{identifier}.bin'
         # pass
 
     def get_basepath(self):

@@ -1,8 +1,19 @@
 from typing import Tuple, Literal, Optional
-from .storage import BinStore
-from .dex import ELEMENTREE
+from .storage import BinStore, BitStore
 import numpy as np
 import random
+import re
+
+GAME_ELEMENTALS = [
+    'FIRE',     # 0
+    'STAR',     # 1
+    'WATER',    # 2
+    'GROUND',   # 3
+    'WIND',     # 4
+    'COSMIC',   # 5
+    'NIL'       # 6
+]
+
 
 max_float32 = np.finfo(np.float32).max
 def random_float32():
@@ -45,6 +56,7 @@ class Player(PlayableNonPlayable):
     data_low   = BinStore('player_low', np.uint16, 6)     # 0 to 65535
     data_high  = BinStore('player_high', np.float32, 3)
     data_items = BinStore('player_items', np.uint8, 200)  # 0 to 255
+    # data_seen  = BitStore('seen', [(i,1) for i in ])
 
     def _loadstore(self, store:Literal['low', 'high', 'items']):
         if store=='low':
@@ -114,7 +126,7 @@ class Player(PlayableNonPlayable):
         if ds[0]['level'] == 0: ds[0]['level'] = 3
         if ds[0]['current_hp'] == 0: ds[0]['current_hp'] = 25
         if ds[0]['status'] == 0: ds[0]['status'] = 1
-        if ds[0]['element'] == 0: ds[0]['element'] = random.randint(1, len(ELEMENTREE))
+        if ds[0]['element'] == 0: ds[0]['element'] = random.randint(1, len(GAME_ELEMENTALS))
         
         if int(ds[1]['seed']) == 0: ds[1]['seed'] = random_float32()
 
