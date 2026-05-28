@@ -15,5 +15,6 @@ __all__ = [
 
     "GameLoop",
     
-    "BinStore"
+    "BinStore",
+    "BitStore"
 ]

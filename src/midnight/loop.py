@@ -10,6 +10,7 @@ import shutil
 import sys
 import atexit
 import termios
+from datetime import datetime
 import signal
 import os
 import select
@@ -43,6 +44,15 @@ class GameLoop:
         self.running = True
         self.gamestate = "MAINMENU"
         self.bctl = bctl
+
+        self.DELTAS = {'current_time': 0.0}
+
+        # NOTE : UI Elements should be
+        # the last to render
+        self._ui_elements = None   # Check for diff
+        self.ui_elements = []      # Actual UI element codes to render
+        self._buffer = None        # Check for diff
+        self.buffer = []           # Actual screen codes to render
 
         # initialize()  # UTF-8 and control code bootstrap
         self.rows, self.cols = self._yx()
@@ -80,25 +90,92 @@ class GameLoop:
                 keys.add(repr(data))
 
         return keys
+
+    def _update_top_bottom(self, timestamp:str):
+
+        if timestamp is None:
+            ts=datetime.fromtimestamp(time.time())
+            timestamp = str(ts)
+
+        # UPDATE Top/Bottom UI Elements
+        ui_s = self.cols
+        ui_top_text = (
+            f" MIDNIGHT 0.0.0 {timestamp}"
+        )
+        ui_tt_s = len(ui_top_text)
+        ui_top_diff_s = ui_s - ui_tt_s
+        final_row = self.rows
+        self.ui_elements = [
+            (
+                CURSORTOTOPLEFT,
+                CLEARLINE,
+                REVERSEVIDEO,
+                ui_top_text,
+                ' '*ui_top_diff_s
+            ),
+            (
+                Cursor(final_row, 0),
+                CLEARLINE,
+                REVERSEVIDEO,
+                ' Hello, World!'
+            )
+        ]
     
     def update(self, dt:float):
+        # NOTE : Need to update the render
+        # matrix here...
         self.rows, self.cols = self._yx()
         keys = self._input_poll()
 
+        # CTRL-C = EXIT
         if ('CTRL_C' in keys):
             self.running = False
+        
+        if (self.DELTAS['current_time'] == 0) or (self.DELTAS['current_time'] % 1 == 0):
+            ts=datetime.fromtimestamp(time.time())
+            timestamp = str(ts)
+        self.DELTAS['current_time'] += dt
+
+        self._update_top_bottom(dt, timestamp)
+
             
         return
     
-    def render(self):
-        Write(
-            CURSORTOTOPLEFT,
-            Cursor(5, 5),
-            "Hello, World!"
-        )
-
-        Flush()
+    def _render_MAINMENU(self):
+        
         return
+    
+    def render(self):
+        # NOTE : Flush to screen happens after.
+        # Check the buffer; Iterate; Render.
+        # No need to constantly redraw every frame.
+
+        try:
+            getattr(self, f'_render_{self.gamestate}')()
+        except Exception as e:
+            raise
+
+        # TODO : Render scr elements
+
+        # Write(
+        #     CURSORTOTOPLEFT,
+        #     Cursor(5, 5),
+        #     "Hello, World!"
+        # )
+
+
+        # Render UI Elements
+        if self._ui_elements is None:
+            self._ui_elements = self.ui_elements
+        if self._ui_elements != self.ui_elements:
+            for ui_element in self.ui_elements:
+                Write(ui_element)
+
+            return Flush()
+        
+        # TODO : Flush for diff in render scr elements
+
+        return  # Proceed without drawing
     
     def run(self):
         last = time.perf_counter()
