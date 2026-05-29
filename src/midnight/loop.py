@@ -41,26 +41,44 @@ class GameLoop:
 
 
     def __init__(self, bctl:bootctl):
+
         self.running = True
         self.gamestate = "MAINMENU"
+        self.start_frame = True
         self.bctl = bctl
 
-        self.DELTAS = {'current_time': 0.0}
+        self.ui_delta = 0.0     # Every int()+1 -> get time, update ui
+        self.selected:tuple[int, int] = (0, 0)  # row, col selected in select screens
 
         # NOTE : UI Elements should be
         # the last to render
-        self._ui_elements = None   # Check for diff
-        self.ui_elements = []      # Actual UI element codes to render
-        self._buffer = None        # Check for diff
-        self.buffer = []           # Actual screen codes to render
+        self._ui_elements = None   # diff check
+        self.ui_elements  = []     # Actual UI element codes to render
+        self._buffer      = None   # diff check
+        self.buffer       = []     # Actual SCREEN codes to render
 
-        # initialize()  # UTF-8 and control code bootstrap
         self.rows, self.cols = self._yx()
+        self._yx_center = None
 
-    @staticmethod
-    def _yx():
+
+    def _yx(self):
         s = shutil.get_terminal_size()
+        rows, cols = s.lines, s.columns
+        if hasattr(self, 'rows'):
+            if (self.rows != rows) or (self.cols != cols):
+                self._yx_center = int(rows/2)-1, int(cols/2)-1
+                Write(CLEAR)
         return s.lines, s.columns
+    
+    @property
+    def yx_center(self):
+
+        # Don't recalculate center unless needed
+        if self._yx_center is not None:
+            return self._yx_center
+            
+        self._yx_center = (int(self.rows/2)-1, int(self.cols/2)-1)
+        return self._yx_center
     
     def _input_poll(self) -> set[str]:
 
@@ -91,7 +109,7 @@ class GameLoop:
 
         return keys
 
-    def _update_top_bottom(self, timestamp:str):
+    def _update_ui_bar(self, timestamp:str):
 
         if timestamp is None:
             ts=datetime.fromtimestamp(time.time())
@@ -99,27 +117,42 @@ class GameLoop:
 
         # UPDATE Top/Bottom UI Elements
         ui_s = self.cols
+        ui_top_note = ' CTRL-C : QUIT '
         ui_top_text = (
             f" MIDNIGHT 0.0.0 {timestamp}"
-        )
-        ui_tt_s = len(ui_top_text)
-        ui_top_diff_s = ui_s - ui_tt_s
-        final_row = self.rows
+        )[:(self.cols-1-len(ui_top_note))]
+
         self.ui_elements = [
             (
                 CURSORTOTOPLEFT,
                 CLEARLINE,
                 REVERSEVIDEO,
                 ui_top_text,
-                ' '*ui_top_diff_s
-            ),
-            (
-                Cursor(final_row, 0),
-                CLEARLINE,
-                REVERSEVIDEO,
-                ' Hello, World!'
+                ' '*(ui_s - len(ui_top_text) - len(ui_top_note)),
+                ui_top_note,
+                RESETFORMATTING
             )
         ]
+
+    def _update_MAINMENU(self, keys:set[str]):
+        
+        if len(keys) == 0:
+            return
+        
+        s_row, s_col = self.selected
+
+        # NOTE : do s_row, s_col checking later,
+        # just handle input here.
+        if ('LEFT' in keys):
+            self.selected = (s_row, s_col-1)
+        elif ('RIGHT' in keys):
+            self.selected = (s_row, s_col+1)
+        elif ('DOWN' in keys):
+            self.selected = (s_row+1, s_col)
+        elif ('UP' in keys):
+            self.selected = (s_row-1, s_col)
+        
+        return
     
     def update(self, dt:float):
         # NOTE : Need to update the render
@@ -130,52 +163,121 @@ class GameLoop:
         # CTRL-C = EXIT
         if ('CTRL_C' in keys):
             self.running = False
-        
-        if (self.DELTAS['current_time'] == 0) or (self.DELTAS['current_time'] % 1 == 0):
+
+        # Every 1/60 frames; Get timestamp, update UI
+        prev = int(self.ui_delta)
+        self.ui_delta += dt
+        curr = int(self.ui_delta)
+        if (prev != curr) or self.start_frame:
+            # do expensive timestamp calculation once a second instead of 60/s
             ts=datetime.fromtimestamp(time.time())
             timestamp = str(ts)
-        self.DELTAS['current_time'] += dt
+            self._update_ui_bar(timestamp)
+            if self.start_frame:
+                self.start_frame = False
+        # -------------------------------------------
 
-        self._update_top_bottom(dt, timestamp)
-
+        # Pass keys to gamestate updater
+        updater = getattr(self, f'_update_{self.gamestate}')
+        if updater:
+            updater(keys)
             
         return
     
+    
     def _render_MAINMENU(self):
-        
+
+        sel_row, sel_col = self.selected
+        cur_row = int(sel_row)
+        cur_col = int(sel_col)
+
+        if (cur_row < 0) or (cur_row > 2): cur_row = 0
+        if (cur_col < 0) or (cur_col > 1): cur_col = 0
+
+        if (cur_row != sel_row) or (cur_col != sel_col):
+            self.selected = (cur_row, cur_col)
+
+        line1 = {
+            (0,0): ' CONTINUE -> ',  # should be conditional
+            (0,1): ' NEW GAME '
+        }.get(self.selected, ' -------- ')
+        self.ui_elements.append(
+            (
+                Cursor(3, 2),
+                REVERSEVIDEO,
+                CLEARLINE,
+                line1,
+                RESETFORMATTING
+            )
+        )
+
+        line2 = {
+            (1,0): ' SETTINGS ',
+            (1,1): ' SETTINGS '
+        }.get(self.selected, ' -------- ')
+        self.ui_elements.append(
+            (
+                Cursor(4, 2),
+                REVERSEVIDEO,
+                CLEARLINE,
+                line2,
+                RESETFORMATTING
+            )
+        )
+
+        line3 = {
+            (2,0): ' GITHUB ',
+            (2,1): ' DEBUG MODE '
+        }.get(self.selected, ' -------- ')
+        self.ui_elements.append(
+            (
+                Cursor(5,2),
+                REVERSEVIDEO,
+                CLEARLINE,
+                line3,
+                RESETFORMATTING
+            )
+        )
+        return False
+
+    def _ruiel(self):
+        '''Render UI Elements with Write'''
+        self._ui_elements = self.ui_elements.copy()
+        for ui_element in self.ui_elements:
+            Write(*ui_element)
+        # TODO : Flush for diff in render scr elements
         return
     
+
+    # ---- PRIMARY RENDER CONTROLLER ----
     def render(self):
         # NOTE : Flush to screen happens after.
         # Check the buffer; Iterate; Render.
         # No need to constantly redraw every frame.
 
+        center_row, center_col = self.yx_center
+
+        # Throw error for bad center;
+        # Bad terminal size should crash the game.
+        if (center_row <= 1) or (center_col <= 1):
+            raise RuntimeError('Terminal size cannot support render.')
+
+        do_flush = False
+
+        # Run the main renderer per game state
         try:
-            getattr(self, f'_render_{self.gamestate}')()
-        except Exception as e:
+            do_flush = bool(getattr(self, f'_render_{self.gamestate}')())
+        except Exception:
             raise
 
-        # TODO : Render scr elements
-
-        # Write(
-        #     CURSORTOTOPLEFT,
-        #     Cursor(5, 5),
-        #     "Hello, World!"
-        # )
-
-
         # Render UI Elements
-        if self._ui_elements is None:
-            self._ui_elements = self.ui_elements
-        if self._ui_elements != self.ui_elements:
-            for ui_element in self.ui_elements:
-                Write(ui_element)
+        if (sorted((self._ui_elements or [])) != sorted(self.ui_elements)) or do_flush:
+            self._ruiel()
+            do_flush = True
+            
+        return (Flush() if do_flush else None)  # Proceed without drawing
+    
 
-            return Flush()
-        
-        # TODO : Flush for diff in render scr elements
-
-        return  # Proceed without drawing
     
     def run(self):
         last = time.perf_counter()
