@@ -18,6 +18,18 @@ import select
 
 class GameLoop:
 
+    class Notification:
+        def __init__(self, t:int=6):
+            self.dt = None
+            self.t = t
+            pass
+        
+        def update(self, dt):
+            if self.dt is None:
+                self.dt = dt
+            else:
+                self.dt += dt
+
     KEYMAP = {
         b'\x1b[A': 'UP',
         b'\x1b[B': 'DOWN',
@@ -45,7 +57,9 @@ class GameLoop:
         self.running = True
         self.gamestate = "MAINMENU"
         self.start_frame = True
+        self.enter_pressed = False
         self.bctl = bctl
+        self.debugmode = False
 
         self.ui_delta = 0.0     # Every int()+1 -> get time, update ui
         self.selected:tuple[int, int] = (0, 0)  # row, col selected in select screens
@@ -56,6 +70,10 @@ class GameLoop:
         self.ui_elements  = []     # Actual UI element codes to render
         self._buffer      = None   # diff check
         self.buffer       = []     # Actual SCREEN codes to render
+
+        # self._uifootnote_t = 0.0
+        # self._uifootnote_max = 6
+        # self._uifootnote:Optional[str] = None
 
         self.rows, self.cols = self._yx()
         self._yx_center = None
@@ -110,13 +128,13 @@ class GameLoop:
         return keys
 
     def _update_ui_bar(self, timestamp:str):
+        '''Update the top UI bar with timestamp.'''
 
         if timestamp is None:
             ts=datetime.fromtimestamp(time.time())
             timestamp = str(ts)
 
-        # UPDATE Top/Bottom UI Elements
-        ui_s = self.cols
+        # UPDATE Top UI Elements
         ui_top_note = ' CTRL-C : QUIT '
         ui_top_text = (
             f" MIDNIGHT 0.0.0 {timestamp}"
@@ -128,21 +146,38 @@ class GameLoop:
                 CLEARLINE,
                 REVERSEVIDEO,
                 ui_top_text,
-                ' '*(ui_s - len(ui_top_text) - len(ui_top_note)),
+                ' '*(self.cols - len(ui_top_text) - len(ui_top_note)),
                 ui_top_note,
                 RESETFORMATTING
             )
         ]
 
+    def normalize_selected(self, minimum:tuple[int, int], maximum:tuple[int, int]):
+        sel_row, sel_col = self.selected
+
+        cur_row = int(sel_row)
+        cur_col = int(sel_col)
+
+        if (cur_row < minimum[0]) or (cur_row > maximum[0]): cur_row = minimum[0]
+        if (cur_col < minimum[1]) or (cur_col > maximum[1]): cur_col = minimum[1]
+
+        if (cur_row != sel_row) or (cur_col != sel_col):
+            self.selected = (cur_row, cur_col)
+        
+        return self.selected
+    
+
     def _update_MAINMENU(self, keys:set[str]):
         
+        # Enter unpress
         if len(keys) == 0:
+            self.enter_pressed = False
             return
         
+        # ---- UI SELECTION LOOP ----
+        # (CURRENT SELECT STATE)
         s_row, s_col = self.selected
-
-        # NOTE : do s_row, s_col checking later,
-        # just handle input here.
+        # (INPUT)
         if ('LEFT' in keys):
             self.selected = (s_row, s_col-1)
         elif ('RIGHT' in keys):
@@ -151,18 +186,40 @@ class GameLoop:
             self.selected = (s_row+1, s_col)
         elif ('UP' in keys):
             self.selected = (s_row-1, s_col)
+        elif ('E' in keys) or ('ENTER' in keys):
+            self.enter_pressed = True
+        # (NORMALIZE)
+        selected = self.normalize_selected((0,0),(2,1))
         
+        if self.enter_pressed:
+            state = {
+                (0,0): 'CONTINUE', (0,1): 'NEWGAME',
+                (1,0): 'SETTINGS', (1,1): 'SETTINGS',
+                (2,0): 'BUILD',    (2,1): 'DEBUGMODE_TOGGLE'
+            }
+            gamestate = state.get(selected)
+            if gamestate:
+                self.gamestate = gamestate
+
         return
     
     def update(self, dt:float):
+        '''
+        Poll for rows, cols, inputs;
+        Execute gamestate render
+        '''
         # NOTE : Need to update the render
         # matrix here...
+
+        # Obtain state data
         self.rows, self.cols = self._yx()
         keys = self._input_poll()
+        state = str(self.gamestate)
 
-        # CTRL-C = EXIT
+        # CTRL-C = EXIT ---------
         if ('CTRL_C' in keys):
             self.running = False
+        # -----------------------
 
         # Every 1/60 frames; Get timestamp, update UI
         prev = int(self.ui_delta)
@@ -176,31 +233,36 @@ class GameLoop:
             if self.start_frame:
                 self.start_frame = False
         # -------------------------------------------
-
-        # Pass keys to gamestate updater
+        # NOTE : Pass keys to gamestate updater
+        # _update_NAMEOFGAMESTATE(keys)->None
         updater = getattr(self, f'_update_{self.gamestate}')
         if updater:
             updater(keys)
-            
+
+        # -------------------------------------------
+
+        # NOTE : Clearing screen is always flashy.
+        #        Try to avoid it!
+        # if state != self.gamestate:
+        #     Write(CLEAR)
+        #     Flush()
+
         return
     
-    
+    def _render_DEBUGMODE_TOGGLE(self):
+        self.debugmode = (False if self.debugmode else True)
+        self.gamestate = 'MAINMENU'
+        return False
+
     def _render_MAINMENU(self):
 
-        sel_row, sel_col = self.selected
-        cur_row = int(sel_row)
-        cur_col = int(sel_col)
+        default_sel = ' -------- '
 
-        if (cur_row < 0) or (cur_row > 2): cur_row = 0
-        if (cur_col < 0) or (cur_col > 1): cur_col = 0
-
-        if (cur_row != sel_row) or (cur_col != sel_col):
-            self.selected = (cur_row, cur_col)
-
+        # NOTE : ui_elements do its own flushing.
         line1 = {
-            (0,0): ' CONTINUE -> ',  # should be conditional
-            (0,1): ' NEW GAME '
-        }.get(self.selected, ' -------- ')
+            (0,0): ' (1/2) CONTINUE / NEW GAME ',  # should be conditional
+            (0,1): ' (2/2) NEW GAME '
+        }.get(self.selected, default_sel)
         self.ui_elements.append(
             (
                 Cursor(3, 2),
@@ -212,9 +274,9 @@ class GameLoop:
         )
 
         line2 = {
-            (1,0): ' SETTINGS ',
-            (1,1): ' SETTINGS '
-        }.get(self.selected, ' -------- ')
+            (1,0): ' (1/1) SETTINGS ',
+            (1,1): ' (1/1) SETTINGS '
+        }.get(self.selected, default_sel)
         self.ui_elements.append(
             (
                 Cursor(4, 2),
@@ -226,9 +288,9 @@ class GameLoop:
         )
 
         line3 = {
-            (2,0): ' GITHUB ',
-            (2,1): ' DEBUG MODE '
-        }.get(self.selected, ' -------- ')
+            (2,0): ' (1/2) BUILD ',
+            (2,1): (f' (2/2) [{('X' if self.debugmode else ' ')}] DEBUG ')
+        }.get(self.selected, default_sel)
         self.ui_elements.append(
             (
                 Cursor(5,2),
@@ -236,6 +298,25 @@ class GameLoop:
                 CLEARLINE,
                 line3,
                 RESETFORMATTING
+            )
+        )
+
+        line4 = ' [ENTER] SELECT '
+        self.ui_elements.append(
+            (
+                # Make sure Line 2 is clear
+                Cursor(2, 0),
+                CLEARLINE,
+
+                Cursor(self.rows-2, 1),
+                CLEARLINE,
+                Cursor(self.rows-1, 2),  # max here later
+                BOLD,
+                REVERSEVIDEO,
+                line4,
+                RESETFORMATTING
+
+                
             )
         )
         return False
@@ -278,8 +359,9 @@ class GameLoop:
         return (Flush() if do_flush else None)  # Proceed without drawing
     
 
-    
-    def run(self):
+    # --- TO RUN THIS APPLICATION ---
+
+    def _run(self):
         last = time.perf_counter()
         try:
             while self.running:
@@ -304,44 +386,11 @@ class GameLoop:
     @staticmethod
     def start():
         '''Execute run loop.'''
-        try:
-            with bootctl() as bctl:
-                GameLoop(bctl).run()
+        
+        try: # Run main application
+            with bootctl() as bctl: 
+                GameLoop(bctl)._run()
+        
         except Exception as exc:
             print(exc)
             traceback.print_exc()
-        # exit() -> reset formatting
-
-
-# class GameLoop:
-#     def __init__(self, stdscr: curses.window):
-#         self.stdscr = stdscr            # Curses Window
-#         self.running = True             # If running=True, the game loop will continue
-#         self.gamestate = "MAINMENUx"     # Defines render state
-
-#         # This enables UP, DOWN, LEFT, and RIGHT keys on keypad
-#         self.stdscr.keypad(True)
-
-#         # item/entity buffers
-#         # self.menuobjects = []
-#         # self.itembuf = []
-#         # self.entities = []
-
-#         self.rows, self.cols = self._update_yx()  # Performs `self.stdscr.getmaxyx()` init
-
-#         # ---- Obtain key settings ----
-#         self.KEYSETTINGS = BinStore('keysettings', dtype=np.float16, size=6)
-#         if not self.KEYSETTINGS.exists:
-#             self.KEYSETTINGS.write(
-#                 self.KEYSETTINGS.formatted(
-#                     [   # UP, DOWN, LEFT, RIGHT, ENTER (A), BACKSPACE (B)
-#                         curses.KEY_UP,
-#                         curses.KEY_DOWN,
-#                         curses.KEY_LEFT,
-#                         curses.KEY_RIGHT,
-#                         curses.KEY_ENTER,
-#                         curses.KEY_BACKSPACE
-#                     ]
-#                 )
-#             )
-        

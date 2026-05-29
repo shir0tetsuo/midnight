@@ -20,7 +20,38 @@ def random_float32():
     value = random.random() * max_float32
     return value
 
-class PlayableNonPlayable:
+class DynamicChar:
+
+    def __init__(
+            self,
+            colors: list[int] = [17,18,19,20,21,63,105,111,147],
+            chars: list[str] = ["@"],
+            # How many times per second should 
+            # it transition color to color
+            color_frequency: float = float(1/16), 
+            char_frequency: float = float(1/8), 
+        ):
+
+        self.col_freq = color_frequency
+        self.chr_freq = char_frequency
+        self.chars:list[str] = chars
+        self.colors:list[int] = colors + colors[:-1].reverse()
+
+    def color(self, dt:float):
+        c=self.colors[int(dt % self.col_freq) % len(self.colors)]
+        t=f"\033[38;5;${c}m"
+        # t=f"\e[38;5;${c}m"
+        return t
+    
+    def char(self, dt:float, additional_chars:Optional[list[str]]=None):
+        if additional_chars is not None:
+            _c=self.chars+additional_chars
+            return _c[int(dt % self.col_freq) % len(self.colors)]
+        return self.chars[int(dt % self.col_freq) % len(self.colors)]
+
+    
+
+class PlayableNonPlayable(DynamicChar):
     def __init__(
             self, 
             yx:Tuple[int, int],
@@ -32,8 +63,13 @@ class PlayableNonPlayable:
             element: int = 1,
             level:int = 1,
             seed: Optional[float] = None,
-            EntityType:Literal['enemy', 'friend', 'player', 'party'] = 'friend'
+            EntityType:Literal['enemy', 'friend', 'player', 'party'] = 'friend',
+            colors: list[int] = [17,18,19,20,21,63,105,111,147],
+            chars: list[str] = ["@"],
+            color_frequency: float = float(1/16), 
+            char_frequency: float = float(1/8), 
         ):
+        super().__init__(colors, chars, color_frequency, char_frequency)
         self.yx         = yx          # row, col position
         self.name       = name
         self.script     = script      # For NPC talk
@@ -145,7 +181,8 @@ class Player(PlayableNonPlayable):
             element=self.ds[0]['element'],
             level=self.ds[0]['level'], 
             seed=self.ds[1]['seed'],
-            EntityType='player'
+            EntityType='player',
+            chars=["𓃥", "@"]
         )
 
         pass
