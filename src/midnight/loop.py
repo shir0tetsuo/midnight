@@ -35,9 +35,9 @@ class GameLoop:
         @property
         def display(self):
             if self.t <= 0:  # -1 will render forever until cleared
-                return True
-            is_displayed = (True if int(self.dt)>=self.t else False)
-            if is_displayed:
+                return (True if (self.s is not None) else False)
+            is_displayed = (True if int(self.dt)<self.t else False)
+            if is_displayed and (self.s is not None):
                 return True
             else:
                 self.s=None
@@ -45,20 +45,23 @@ class GameLoop:
 
         def ui_elements(self, yx:tuple[int,int], yx_center:tuple[int,int]):
             s='[!] '+str(self.s)
-            if len(s) >= 200:
+            if len(s) > 200:
                 s = s[:197]+'...'
             texts=textwrap.wrap(s, width=yx_center[1])
-            lines = len(texts)-1
             _c=[]
-            for i, line in list(enumerate(texts)):
+            for i, line in list(enumerate(reversed(texts))):
                     
-                diff = (yx[0])-lines-(i+1)
+                diff = yx[0] - 1 - i
                 if i>0:
                     _c.append((Cursor(diff, 2), line))
                 else:
                     _c.append((Cursor(diff, 2), REVERSEVIDEO, ' ', line))
-
-            return tuple(tuple(tup) for tup in _c) + (' ', RESETFORMATTING)
+            
+            flat = []
+            for item in _c:
+                flat.extend(item)
+            flat.extend((' ', RESETFORMATTING))
+            return tuple(flat) 
 
     KEYMAP = {
         b'\x1b[A': 'UP',
@@ -211,8 +214,18 @@ class GameLoop:
         
         return self.selected
     
+    def _update_NEWGAME(self, keys:set[str]) -> None:
+        self.gamestate = "DIALOGUE"
+        self.Notification = GameLoop._Notification('A'*100, t=6)
 
-    def _update_MAINMENU(self, keys:set[str]):
+        # Write(CLEAR)
+        # Flush()
+        # TEST ONLY
+        self.gamestate = "MAINMENU"
+        return
+    
+
+    def _update_MAINMENU(self, keys:set[str]) -> None:
         
         # Enter unpress
         if len(keys) == 0:
@@ -296,11 +309,14 @@ class GameLoop:
         self.debugmode = (False if self.debugmode else True)
         self.gamestate = 'MAINMENU'
         return False
+    
+    def _render_NEWGAME(self):
+        return False
 
     def _render_MAINMENU(self):
 
-        if self.Notification.display:
-            self.ui_elements.append(self.Notification.ui_elements((self.rows, self.cols), self.yx_center))
+        # Keep only the top bar, clear gamestate elements from previous frame
+        self.ui_elements = self.ui_elements[:1] if len(self.ui_elements) > 0 else []
 
         default_sel = ' -------- '
 
@@ -354,8 +370,6 @@ class GameLoop:
                 Cursor(2, 0),
                 CLEARLINE,
 
-                Cursor(self.rows-2, 1),
-                CLEARLINE,
                 Cursor(self.rows-1, 2),  # max here later
                 BOLD,
                 REVERSEVIDEO,
@@ -365,6 +379,25 @@ class GameLoop:
                 
             )
         )
+
+        # Clear all notification lines (from row 7 to bottom, including rows-1)
+        for row in range(7, self.rows):
+            self.ui_elements.append((Cursor(row, 0), CLEARLINE))
+
+        # Re-add the ENTER/SPACE line after clearing to ensure it renders on top
+        self.ui_elements.append(
+            (
+                Cursor(self.rows-1, 2),
+                BOLD,
+                REVERSEVIDEO,
+                line4,
+                RESETFORMATTING
+            )
+        )
+
+        if self.Notification.display:
+            self.ui_elements.append(self.Notification.ui_elements((self.rows, self.cols), self.yx_center))
+
         return False
 
     def _ruiel(self):
@@ -398,7 +431,7 @@ class GameLoop:
             raise
 
         # Render UI Elements
-        if (sorted((self._ui_elements or [])) != sorted(self.ui_elements)) or do_flush:
+        if ((self._ui_elements or []) != self.ui_elements) or do_flush:
             self._ruiel()
             do_flush = True
             
