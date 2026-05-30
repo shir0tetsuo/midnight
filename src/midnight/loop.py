@@ -3,7 +3,8 @@ import traceback
 from .storage import BinStore
 from .bootstrap import bootctl
 from .ansicodes import *
-from .entity import Player
+from .keymap import main_keymap
+from .entity import Player, Notification
 from typing import Union, Optional
 import numpy as np
 import textwrap
@@ -19,74 +20,7 @@ import select
 
 class GameLoop:
 
-    class _Notification:
-        def __init__(self, s:Optional[str]=None, t:int=6):
-            self.s:Optional[str] = s
-            self.dt:float = None
-            self.t = t
-            pass
-        
-        def update(self, dt):
-            if self.dt is None:
-                self.dt = dt
-            else:
-                self.dt += dt
-
-        @property
-        def display(self):
-            if self.t <= 0:  # -1 will render forever until cleared
-                return (True if (self.s is not None) else False)
-            is_displayed = (True if int(self.dt)<self.t else False)
-            if is_displayed and (self.s is not None):
-                return True
-            else:
-                self.s=None
-                return False
-
-        def ui_elements(self, yx:tuple[int,int], yx_center:tuple[int,int]):
-            s='[!] '+str(self.s)
-            if len(s) > 200:
-                s = s[:197]+'...'
-            texts=textwrap.wrap(s, width=yx_center[1])
-            _c=[]
-            for i, line in list(enumerate(reversed(texts))):
-                    
-                diff = yx[0] - 1 - i
-                if i>0:
-                    _c.append((Cursor(diff, 2), line))
-                else:
-                    _c.append((Cursor(diff, 2), REVERSEVIDEO, ' ', line))
-            
-            flat = []
-            for item in _c:
-                flat.extend(item)
-            flat.extend((' ', RESETFORMATTING))
-            return tuple(flat) 
-
-    KEYMAP = {
-        b'\x1b[A': 'UP',
-        b'\x1b[B': 'DOWN',
-        b'\x1b[C': 'RIGHT',
-        b'\x1b[D': 'LEFT',
-
-        b'\r': 'ENTER', # Interact (A)
-        b'\x7f': 'BACKSPACE', # Exit (B)
-        b'\x1b': 'ESC',
-
-        b'w': 'W',  # UP
-        b'a': 'A',  # LEFT
-        b's': 'S',  # DOWN
-        b'd': 'D',  # RIGHT
-        b'e': 'E',  # Interact (A)
-        b' ': 'SPACE',
-        b'\t': 'TAB',
-        b'\x1b': 'ESCAPE',
-
-        b'q': 'Q',  # Exit (B)
-
-        b'\x03': 'CTRL_C',
-    }
-
+    KEYMAP = main_keymap
 
     def __init__(self, bctl:bootctl):
 
@@ -107,7 +41,7 @@ class GameLoop:
         self.ui_elements  = []     # Actual UI element codes to render
         self._buffer      = None   # diff check
         self.buffer       = []     # Actual SCREEN codes to render
-        self.Notification = GameLoop._Notification()
+        self.Notification = Notification()
 
         # self._uifootnote_t = 0.0
         # self._uifootnote_max = 6
@@ -216,8 +150,9 @@ class GameLoop:
     
     def _update_NEWGAME(self, keys:set[str]) -> None:
         self.gamestate = "DIALOGUE"
-        self.Notification = GameLoop._Notification('A'*100, t=6)
+        self.Notification = Notification('Loading...', t=-1)
 
+        self.Player = Player((0,0))
         # Write(CLEAR)
         # Flush()
         # TEST ONLY

@@ -183,7 +183,7 @@ class BinStore(Store):
         for value in self.loaded:
             if int(value) == 0:
                 break
-            yield value    
+            yield value
   
     @property
     def loaded(self):
