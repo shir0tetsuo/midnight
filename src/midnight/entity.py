@@ -46,8 +46,8 @@ class DynamicChar:
     def char(self, dt:float, additional_chars:Optional[list[str]]=None):
         if additional_chars is not None:
             _c=self.chars+additional_chars
-            return _c[int(dt % self.col_freq) % len(self.colors)]
-        return self.chars[int(dt % self.col_freq) % len(self.colors)]
+            return _c[int(dt % self.chr_freq) % len(self.colors)]
+        return self.chars[int(dt % self.chr_freq) % len(self.colors)]
 
     
 
@@ -70,7 +70,7 @@ class PlayableNonPlayable(DynamicChar):
             char_frequency: float = float(1/8), 
         ):
         super().__init__(colors, chars, color_frequency, char_frequency)
-        self.yx         = yx          # row, col position
+        self.yx         = yx          # world row, col position
         self.name       = name
         self.script     = script      # For NPC talk
         self.hp         = hp

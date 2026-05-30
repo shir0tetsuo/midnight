@@ -3,7 +3,8 @@ import traceback
 from .storage import BinStore
 from .bootstrap import bootctl
 from .ansicodes import *
-from typing import Union
+from .entity import Player
+from typing import Union, Optional
 import numpy as np
 import textwrap
 import shutil
@@ -18,9 +19,10 @@ import select
 
 class GameLoop:
 
-    class Notification:
-        def __init__(self, t:int=6):
-            self.dt = None
+    class _Notification:
+        def __init__(self, s:Optional[str]=None, t:int=6):
+            self.s:Optional[str] = s
+            self.dt:float = None
             self.t = t
             pass
         
@@ -29,6 +31,34 @@ class GameLoop:
                 self.dt = dt
             else:
                 self.dt += dt
+
+        @property
+        def display(self):
+            if self.t <= 0:  # -1 will render forever until cleared
+                return True
+            is_displayed = (True if int(self.dt)>=self.t else False)
+            if is_displayed:
+                return True
+            else:
+                self.s=None
+                return False
+
+        def ui_elements(self, yx:tuple[int,int], yx_center:tuple[int,int]):
+            s='[!] '+str(self.s)
+            if len(s) >= 200:
+                s = s[:197]+'...'
+            texts=textwrap.wrap(s, width=yx_center[1])
+            lines = len(texts)-1
+            _c=[]
+            for i, line in list(enumerate(texts)):
+                    
+                diff = (yx[0])-lines-(i+1)
+                if i>0:
+                    _c.append((Cursor(diff, 2), line))
+                else:
+                    _c.append((Cursor(diff, 2), REVERSEVIDEO, ' ', line))
+
+            return tuple(tuple(tup) for tup in _c) + (' ', RESETFORMATTING)
 
     KEYMAP = {
         b'\x1b[A': 'UP',
@@ -45,6 +75,9 @@ class GameLoop:
         b's': 'S',  # DOWN
         b'd': 'D',  # RIGHT
         b'e': 'E',  # Interact (A)
+        b' ': 'SPACE',
+        b'\t': 'TAB',
+        b'\x1b': 'ESCAPE',
 
         b'q': 'Q',  # Exit (B)
 
@@ -54,12 +87,13 @@ class GameLoop:
 
     def __init__(self, bctl:bootctl):
 
-        self.running = True
-        self.gamestate = "MAINMENU"
-        self.start_frame = True
-        self.enter_pressed = False
-        self.bctl = bctl
-        self.debugmode = False
+        self.running = True             # False -> EXIT
+        self.gamestate = "MAINMENU"     # Affects update, render calls
+        self.start_frame = True         # If start frame, init top bar ui
+        self.enter_pressed = False      # If ENTER is pressed -> action
+        self.bctl = bctl                # Boot Control
+        self.debugmode = False          # Special Debugging Flag
+        self.Player:Optional[Player] = None
 
         self.ui_delta = 0.0     # Every int()+1 -> get time, update ui
         self.selected:tuple[int, int] = (0, 0)  # row, col selected in select screens
@@ -70,6 +104,7 @@ class GameLoop:
         self.ui_elements  = []     # Actual UI element codes to render
         self._buffer      = None   # diff check
         self.buffer       = []     # Actual SCREEN codes to render
+        self.Notification = GameLoop._Notification()
 
         # self._uifootnote_t = 0.0
         # self._uifootnote_max = 6
@@ -77,6 +112,7 @@ class GameLoop:
 
         self.rows, self.cols = self._yx()
         self._yx_center = None
+        self._yx_quarter = None
 
 
     def _yx(self):
@@ -85,6 +121,7 @@ class GameLoop:
         if hasattr(self, 'rows'):
             if (self.rows != rows) or (self.cols != cols):
                 self._yx_center = int(rows/2)-1, int(cols/2)-1
+                self._yx_quarter = int(rows/4), int(cols/4)
                 Write(CLEAR)
         return s.lines, s.columns
     
@@ -97,6 +134,14 @@ class GameLoop:
             
         self._yx_center = (int(self.rows/2)-1, int(self.cols/2)-1)
         return self._yx_center
+    
+    @property
+    def yx_quarter(self):
+        if self._yx_quarter is not None:
+            return self._yx_quarter
+
+        self._yx_quarter = (int(self.rows/4), int(self.cols/4))
+        return self._yx_quarter
     
     def _input_poll(self) -> set[str]:
 
@@ -186,7 +231,7 @@ class GameLoop:
             self.selected = (s_row+1, s_col)
         elif ('UP' in keys):
             self.selected = (s_row-1, s_col)
-        elif ('E' in keys) or ('ENTER' in keys):
+        elif ('E' in keys) or ('ENTER' in keys) or ('SPACE' in keys):
             self.enter_pressed = True
         # (NORMALIZE)
         selected = self.normalize_selected((0,0),(2,1))
@@ -214,7 +259,6 @@ class GameLoop:
         # Obtain state data
         self.rows, self.cols = self._yx()
         keys = self._input_poll()
-        state = str(self.gamestate)
 
         # CTRL-C = EXIT ---------
         if ('CTRL_C' in keys):
@@ -238,14 +282,13 @@ class GameLoop:
         updater = getattr(self, f'_update_{self.gamestate}')
         if updater:
             updater(keys)
-
+        # 
         # -------------------------------------------
+        # NOTE : Update notification display timer
+        self.Notification.update(dt)
 
         # NOTE : Clearing screen is always flashy.
         #        Try to avoid it!
-        # if state != self.gamestate:
-        #     Write(CLEAR)
-        #     Flush()
 
         return
     
@@ -255,6 +298,9 @@ class GameLoop:
         return False
 
     def _render_MAINMENU(self):
+
+        if self.Notification.display:
+            self.ui_elements.append(self.Notification.ui_elements((self.rows, self.cols), self.yx_center))
 
         default_sel = ' -------- '
 
@@ -301,7 +347,7 @@ class GameLoop:
             )
         )
 
-        line4 = ' [ENTER] SELECT '
+        line4 = ' [ENTER/SPACE] SELECT '
         self.ui_elements.append(
             (
                 # Make sure Line 2 is clear
