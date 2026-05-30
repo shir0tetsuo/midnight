@@ -37,7 +37,8 @@ class DynamicChar:
         self.col_freq = color_frequency
         self.chr_freq = char_frequency
         self.chars:list[str] = chars
-        self.colors:list[int] = colors + colors[:-1].reverse()
+        # Build a palindromic color list by appending the reversed
+        self.colors:list[int] = colors + colors[:-1][::-1]
 
     def color(self, dt:float):
         c=self.colors[int(dt % self.col_freq) % len(self.colors)]
@@ -80,7 +81,7 @@ class PlayableNonPlayable(DynamicChar):
         self.species    = species     # in-game species number, affects rendering
         self.element    = element     # Entity Elemental Element
         self.level      = level       # Entity Level
-        self.seed       = seed or random_float32()
+        self.seed       = random_float32()  # BUG TODO
         self.EntityType = EntityType  # Entity Type, affects update cycles
 
         pass
@@ -159,14 +160,14 @@ class Player(PlayableNonPlayable):
     def loadstore(self):
         ds=[ self._loadstore(d) for d in ['low', 'high', 'items'] ]
 
-        # first-run conditions
-        if ds[0]['species'] == 0: ds[0]['species'] = 1
-        if ds[0]['level'] == 0: ds[0]['level'] = 3
-        if ds[0]['current_hp'] == 0: ds[0]['current_hp'] = 25
-        if ds[0]['status'] == 0: ds[0]['status'] = 1
-        if ds[0]['element'] == 0: ds[0]['element'] = random.randint(1, len(GAME_ELEMENTALS))
+        # # first-run conditions
+        # if ds[0]['species'] == 0: ds[0]['species'] = 1
+        # if ds[0]['level'] == 0: ds[0]['level'] = 3
+        # if ds[0]['current_hp'] == 0: ds[0]['current_hp'] = 25
+        # if ds[0]['status'] == 0: ds[0]['status'] = 1
+        # if ds[0]['element'] == 0: ds[0]['element'] = random.randint(1, len(GAME_ELEMENTALS))
         
-        if int(ds[1]['seed']) == 0: ds[1]['seed'] = random_float32()
+        # if int(ds[1]['seed']) == 0: ds[1]['seed'] = random_float32()
 
         return ds
 
@@ -188,6 +189,21 @@ class Player(PlayableNonPlayable):
         )
 
         pass
+
+    @property
+    def debug(self):
+        return {
+            'yx':self.yx,'name':self.name,
+            'hp':self.hp,'stat':self.status,
+            'species':self.species,
+            'element':self.element,
+            'lvl':self.level,
+            'seed':self.seed,
+            'EntityType':self.EntityType,
+            'dc': {
+                'chars':self.chars, 'colors':self.colors
+            }
+        }
 
 class Notification:
     def __init__(self, s:Optional[str]=None, t:int=6):

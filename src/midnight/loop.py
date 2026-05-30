@@ -1,6 +1,6 @@
 import time
 import traceback
-from .storage import BinStore
+from .storage import BinStore, Log
 from .bootstrap import bootctl
 from .ansicodes import *
 from .keymap import main_keymap
@@ -25,6 +25,7 @@ class GameLoop:
     def __init__(self, bctl:bootctl):
 
         self.bctl = bctl                        # Boot Control
+        self.Log:Optional[Log] = None
         self.debugmode = False                  # Special Debugging Flag
         self.Player:Optional[Player] = None     # Lazy Player Container
 
@@ -149,9 +150,17 @@ class GameLoop:
         self.gamestate = "DIALOGUE"
         self.Notification = Notification('Loading...', t=-1)
 
+        self.Log = Log('debugging')
         self.Player = Player((0,0))
         # Write(CLEAR)
         # Flush()
+        
+        if self.debugmode:
+            v=self.Player.debug
+            l=self.Log.path
+            self.Notification = Notification(f'Player Loaded, log={str(l)}', t=-1)
+            self.Log.Tee(v,level='info')
+
         # TEST ONLY
         self.gamestate = "MAINMENU"
         return
@@ -295,7 +304,7 @@ class GameLoop:
             )
         )
 
-        line4 = ' [ENTER/SPACE] SELECT '
+        line4 = ' [ENTER/SPACE] '
         self.ui_elements.append(
             (
                 # Make sure Line 2 is clear
