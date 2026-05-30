@@ -24,29 +24,26 @@ class GameLoop:
 
     def __init__(self, bctl:bootctl):
 
-        self.running = True             # False -> EXIT
-        self.gamestate = "MAINMENU"     # Affects update, render calls
-        self.start_frame = True         # If start frame, init top bar ui
-        self.enter_pressed = False      # If ENTER is pressed -> action
-        self.bctl = bctl                # Boot Control
-        self.debugmode = False          # Special Debugging Flag
-        self.Player:Optional[Player] = None
+        self.bctl = bctl                        # Boot Control
+        self.debugmode = False                  # Special Debugging Flag
+        self.Player:Optional[Player] = None     # Lazy Player Container
 
-        self.ui_delta = 0.0     # Every int()+1 -> get time, update ui
+        # Logic Control Variables
+        self.running        = True              # False -> EXIT
+        self.start_frame    = True              # If start frame, init top bar ui
+        self.enter_pressed  = False             # If ENTER is pressed -> action
+        self.gamestate      = "MAINMENU"        # Affects update, render calls
+        self.ui_delta       = 0.0               # Every int()+1 -> get time, update ui
         self.selected:tuple[int, int] = (0, 0)  # row, col selected in select screens
 
-        # NOTE : UI Elements should be
-        # the last to render
-        self._ui_elements = None   # diff check
-        self.ui_elements  = []     # Actual UI element codes to render
-        self._buffer      = None   # diff check
-        self.buffer       = []     # Actual SCREEN codes to render
-        self.Notification = Notification()
+        # Render Elements
+        self._ui_elements = None            # diff check
+        self.ui_elements  = []              # Actual UI element codes to render
+        self._buffer      = None            # diff check
+        self.buffer       = []              # Actual SCREEN codes to render
+        self.Notification = Notification()  # Notification System
 
-        # self._uifootnote_t = 0.0
-        # self._uifootnote_max = 6
-        # self._uifootnote:Optional[str] = None
-
+        # Terminal rows, columns system
         self.rows, self.cols = self._yx()
         self._yx_center = None
         self._yx_quarter = None
