@@ -86,88 +86,88 @@ class PlayableNonPlayable(DynamicChar):
 
 class Player(PlayableNonPlayable):
 
-    data_low   = BinStore('player_low', np.uint16, 6)     # 0 to 65535
-    data_high  = BinStore('player_high', np.float32, 3)
-    data_items = BinStore('player_items', np.uint8, 200)  # 0 to 255
+    # data_low   = BinStore('player_low', np.uint16, 6)     # 0 to 65535
+    # data_high  = BinStore('player_high', np.float32, 3)
+    # data_items = BinStore('player_items', np.uint8, 200)  # 0 to 255
     # data_seen  = BitStore('seen', [(i,1) for i in ])
 
-    def _loadstore(self, store:Literal['low', 'high', 'items']):
-        if store=='low':
-            return {
-                identifier: num
-                for identifier,num in Player.data_low.chunked(
-                    [
-                        'species',
-                        'level',
-                        'current_hp',
-                        'status',
-                        'element',
-                        'exp'
-                    ]
-                )
-            }
+    # def _loadstore(self, store:Literal['low', 'high', 'items']):
+    #     if store=='low':
+    #         return {
+    #             identifier: num
+    #             for identifier,num in Player.data_low.chunked(
+    #                 [
+    #                     'species',
+    #                     'level',
+    #                     'current_hp',
+    #                     'status',
+    #                     'element',
+    #                     'exp'
+    #                 ]
+    #             )
+    #         }
         
-        elif store=='high':
-            return {
-                identifier: num
-                for identifier,num in Player.data_high.chunked(
-                    [
-                        'gametime',
-                        'last_game',
-                        'seed'
-                    ]
-                )
-            }
+    #     elif store=='high':
+    #         return {
+    #             identifier: num
+    #             for identifier,num in Player.data_high.chunked(
+    #                 [
+    #                     'gametime',
+    #                     'last_game',
+    #                     'seed'
+    #                 ]
+    #             )
+    #         }
         
-        elif store=='items':
-            return list(Player.data_items.values_until_zero())
+    #     elif store=='items':
+    #         return list(Player.data_items.values_until_zero())
         
-    def savestore(self):
-        ds=self.ds
-        Player.data_low.write(
-            Player.data_low.formatted(
-                [
-                    self.species, 
-                    self.level, 
-                    self.hp, 
-                    self.status,
-                    self.element,
-                    ds[0]['exp']
-                ]
-            )
-        )
-        Player.data_high.write(
-            Player.data_high.formatted(
-                [
-                    ds[1]['gametime'],
-                    ds[1]['last_game'],
-                    self.seed
-                ]
-            )
-        )
-        Player.data_items.write(
-            Player.data_items.formatted(
-                ds[2]
-            )
-        )
+    # def savestore(self):
+    #     ds=self.ds
+    #     Player.data_low.write(
+    #         Player.data_low.formatted(
+    #             [
+    #                 self.species, 
+    #                 self.level, 
+    #                 self.hp, 
+    #                 self.status,
+    #                 self.element,
+    #                 ds[0]['exp']
+    #             ]
+    #         )
+    #     )
+    #     Player.data_high.write(
+    #         Player.data_high.formatted(
+    #             [
+    #                 ds[1]['gametime'],
+    #                 ds[1]['last_game'],
+    #                 self.seed
+    #             ]
+    #         )
+    #     )
+    #     Player.data_items.write(
+    #         Player.data_items.formatted(
+    #             ds[2]
+    #         )
+    #     )
         
-    def loadstore(self):
-        ds=[ self._loadstore(d) for d in ['low', 'high', 'items'] ]
+    # def loadstore(self):
+    #     ds=[ self._loadstore(d) for d in ['low', 'high', 'items'] ]
 
-        # # first-run conditions
-        # if ds[0]['species'] == 0: ds[0]['species'] = 1
-        # if ds[0]['level'] == 0: ds[0]['level'] = 3
-        # if ds[0]['current_hp'] == 0: ds[0]['current_hp'] = 25
-        # if ds[0]['status'] == 0: ds[0]['status'] = 1
-        # if ds[0]['element'] == 0: ds[0]['element'] = random.randint(1, len(GAME_ELEMENTALS))
+    #     # # first-run conditions
+    #     # if ds[0]['species'] == 0: ds[0]['species'] = 1
+    #     # if ds[0]['level'] == 0: ds[0]['level'] = 3
+    #     # if ds[0]['current_hp'] == 0: ds[0]['current_hp'] = 25
+    #     # if ds[0]['status'] == 0: ds[0]['status'] = 1
+    #     # if ds[0]['element'] == 0: ds[0]['element'] = random.randint(1, len(GAME_ELEMENTALS))
         
-        # if int(ds[1]['seed']) == 0: ds[1]['seed'] = random_float32()
+    #     # if int(ds[1]['seed']) == 0: ds[1]['seed'] = random_float32()
 
-        return ds
+    #     return ds
 
     def __init__(self, yx:Tuple[int, int]):
 
-        self.ds = self.loadstore()  # load player data
+        # self.ds = self.loadstore()  # load player data
         
         super().__init__(
             yx=yx, 
@@ -198,47 +198,3 @@ class Player(PlayableNonPlayable):
                 'chars':self.chars, 'colors':self.colors
             }
         }
-
-class Notification:
-    def __init__(self, s:Optional[str]=None, t:int=6):
-        self.s:Optional[str] = s
-        self.dt:float = None
-        self.t = t
-        pass
-    
-    def update(self, dt):
-        if self.dt is None:
-            self.dt = dt
-        else:
-            self.dt += dt
-
-    @property
-    def display(self):
-        if self.t <= 0:  # -1 will render forever until cleared
-            return (True if (self.s is not None) else False)
-        is_displayed = (True if int(self.dt)<self.t else False)
-        if is_displayed and (self.s is not None):
-            return True
-        else:
-            self.s=None
-            return False
-
-    def ui_elements(self, yx:tuple[int,int], yx_center:tuple[int,int]):
-        s='[!] '+str(self.s)
-        if len(s) > 200:
-            s = s[:197]+'...'
-        texts=textwrap.wrap(s, width=yx_center[1])
-        _c=[]
-        for i, line in list(enumerate(reversed(texts))):
-                
-            diff = yx[0] - 1 - i
-            if i>0:
-                _c.append((Cursor(diff, 2), line))
-            else:
-                _c.append((Cursor(diff, 2), REVERSEVIDEO, ' ', line))
-        
-        flat = []
-        for item in _c:
-            flat.extend(item)
-        flat.extend((' ', RESETFORMATTING))
-        return tuple(flat) 

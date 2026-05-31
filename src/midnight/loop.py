@@ -4,7 +4,8 @@ from .storage import BinStore, Log
 from .bootstrap import bootctl
 from .ansicodes import *
 from .keymap import main_keymap
-from .entity import Player, Notification
+from .entity import Player
+from .notification import Notification
 from typing import Union, Optional
 import numpy as np
 import textwrap
