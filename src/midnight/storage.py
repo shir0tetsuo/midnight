@@ -3,15 +3,18 @@ from pathlib import Path
 import os
 import threading
 import platform
-from typing import Union
+from typing import Union, Optional, Literal
 import logging
+from .version import __version__
 
 class Store:
+    '''Primary source of save directory information'''
     _system = {}
     
     def __init__(
             self,
             identifier:str,
+            suffix: str = '.bin'
         ):
         '''
         :param identifier: The storage identifier (name of the file), no suffix.
@@ -21,7 +24,7 @@ class Store:
         # Get system, path
         self._system.setdefault('system', platform.system())
         self.basepath = self.get_basepath()
-        self.path:Path = self.basepath / f'{identifier}.bin'
+        self.path:Path = self.basepath / f'{identifier}{suffix}'
         # pass
 
     def get_basepath(self):
@@ -44,6 +47,22 @@ class Store:
             raise
 
         return path
+    
+    @property
+    def size_bytes(self):
+        try:
+            return self.path.stat().st_size
+        except (FileNotFoundError, OSError):
+            return 0
+
+    @property
+    def human_size_bytes(self) -> Optional[str]:
+        size = self.size_bytes
+        for unit in ("B", "KB", "MB", "GB"):
+            if size < 1024 or unit == "PB":
+                return f"{size:.1f} {unit}"
+            size /= 1024
+        return
 
     @property
     def system(self):
@@ -55,8 +74,7 @@ class Store:
     
 class Log(Store):
     def __init__(self, identifier):
-        super().__init__(identifier)
-        self.path = self.path.parent / f'{identifier}.log'
+        super().__init__(identifier, suffix='.log')
         # Configure a dedicated logger that writes to this log file.
         # Use the file path as part of the logger name so multiple
         # Log instances don't clash.
@@ -95,6 +113,149 @@ class Log(Store):
                         f.write(msg + (end or '\n'))
                 except Exception:
                     pass
+
+class SaveFile(Store):
+
+    # NOTE : 3.4e38 (32-bit), 256*256
+    #        = 256 KB / file,
+    #        more than enough values
+
+    HEADER_SIZE = 128
+    cast:dict[str, tuple[int, Union[np.float32, np.float64], int, Union[np.uint32, np.uint64]]] = {
+        '32-bit': (
+            65536-(HEADER_SIZE // np.dtype(np.float32).itemsize), 
+            np.float32, 32, np.uint32
+        ),
+        '64-bit': (
+            32768-(HEADER_SIZE // np.dtype(np.float64).itemsize), 
+            np.float64, 64, np.uint64
+        )
+    }
+
+    def __init__(
+            self, 
+            identifier,
+            store_type: Literal['32-bit', '64-bit'] = '32-bit'
+        ):
+        super().__init__(identifier, suffix='.bin')
+        
+        self.store_type = store_type
+        
+        # size, dtype, bits, uint
+        self._size, self._dtype, self._bits, self._uint = self.cast[self.store_type]
+        self._bit_shifts = np.arange(self._bits - 1, -1, -1, dtype=self._uint)
+        self.data = self._open_memmap()
+    
+    @property
+    def header(self):
+        h = (
+            b"MID.NIGHTMOONBEAM_" 
+            + __version__.encode("utf-8") 
+            + b'_' 
+            + self.store_type.encode("utf-8")
+        )
+        return h.ljust(self.HEADER_SIZE, b"\x00")
+
+    def _open_memmap(self):
+        expected_size = self.HEADER_SIZE + self._size * np.dtype(self._dtype).itemsize
+        actual_size = self.size_bytes
+
+        with self.lock:
+            # not exists: Header/Zero flush
+            if not self.exists:
+                with open(self.path, "wb") as f:
+                    f.write(self.header)
+
+                data = np.memmap(
+                    self.path,
+                    dtype=self._dtype,
+                    mode="r+",
+                    offset=self.HEADER_SIZE,
+                    shape=(self._size,)
+                )
+
+                f.truncate(expected_size)
+                # os.fsync(self.data._mmap.fileno())
+                data.flush()
+                return data
+
+            with open(self.path, "rb") as f:
+                header = f.read(self.HEADER_SIZE)
+
+            decoded_header = header.decode('utf-8', errors='replace')
+
+            if not header.startswith(b'MID.NIGHTMOONBEAM'):
+                raise ValueError(f"Bad header: {self.path}: {str(decoded_header)}")
+
+            parts = decoded_header.strip("\x00").split("_")
+            if len(parts) < 3:
+                raise ValueError("Corrupt header (sum parts not 3)")
+            
+            if self.store_type not in decoded_header:
+                raise TypeError(f'store type {self.store_type} but file is not.')
+
+            if actual_size != expected_size:
+                raise ValueError(
+                    f"Invalid file size: expected {expected_size}, got {actual_size}"
+                )
+            
+            return np.memmap(
+                self.path,
+                dtype=self._dtype,
+                mode="r+",
+                offset=self.HEADER_SIZE,
+                shape=(self._size,)
+            )
+
+    def value_cast(
+            self, 
+            value:Union[
+                int, float, bool, np.integer, np.floating, np.bool_
+            ]
+        ) -> Union[np.float32, np.float64]:
+        return value if isinstance(value, self._dtype) else self._dtype(value)
+        # cv = self._dtype(value)
+        # if not np.isfinite(cv):
+        #     raise ValueError(f"Cannot align value to {self._dtype}: {value}")
+        # return cv
+    
+    def poke(
+            self, index:int, value:Union[
+                int, float, bool, np.integer, np.floating, np.bool_
+            ]
+        ):
+        if not (0 <= index < self._size):
+            raise IndexError(
+                f"Index {index} out of range [0, {self._size}]"
+            )
+        # NOTE : Index can be expressed like 
+        # (32*32) up to 128 (64) / 256 (32)
+        self.data[index] = self.value_cast(value)
+
+    def floating_to_bits(self, value: Union[np.float32, np.float64]):
+        f = np.asarray(value, dtype=self._dtype)
+        as_int = f.view(self._uint)
+        return ((as_int >> self._bit_shifts) & 1).astype(np.uint8)
+        # return ((as_int >> np.arange(self._bits - 1, -1, -1)) & 1).astype(np.uint8)
+    
+    def bits_to_floating(self, bits: list[Union[int, bool]]):
+        max_bits, uint = self._bits, self._uint
+        if len(bits) != max_bits:
+            raise ValueError(f"Must be exactly {max_bits}")
+        as_int = 0
+        for b in bits:
+            as_int = (as_int << 1) | int(b)
+        
+        return uint(as_int).view(self._dtype)
+
+
+    def flush(self):
+        with self.lock:
+            try:
+                self.data.flush()
+            except Exception as e:
+                raise IOError(f'Failed to flush SaveFile {self.path}: {type(e)}: {e}')
+
 
 class BitStore(Store):
 
@@ -174,95 +335,3 @@ class BitStore(Store):
         with self.lock:
             with open(self.path, 'wb') as f:
                 f.write(byte_data)
-
-
-class BinStore(Store):
-    '''Store numpy arrays of numpy floats into binary files.'''
-
-    def __init__(
-            self, 
-            identifier:str,
-            dtype: Union[       # max_n
-                np.uint8,       # 0 to 255 (8-bit), 1 byte per value
-                np.int8,        # -128 to 127 (8-bit), 1 byte per value
-                np.uint16,      # 0 to 65535 (16-bit), 2 bytes per value
-                np.uint32,      # 0 to 4,294,967,295 (32-bit), 4 bytes per value
-                np.float16,     # 65504.0 (16-bit)
-                np.float32,     # 3.4e38 (32-bit)
-                np.float64,     # 1.8e308 (64-bit)
-                np.longdouble   # 1.2e4932 (platform-dependent)
-            ] = np.float32,
-            size: int = 512  # Maximum size of chunks to read
-        ):
-        '''
-        :param identifier: The storage identifier (name of the file), no suffix.
-        :param size: Maximum size of chunks to read. The file will be padded to
-            **`n`**`*dtype*size`
-        '''
-
-        super().__init__(identifier=identifier)
-
-        # Maximum float store size
-        self.dtype = dtype
-        self.size  = size
-        self.data  = None
-
-    def formatted(self, l:list[int|float]) -> np.ndarray:
-        return np.asarray(l, dtype=self.dtype)
-    
-    @classmethod
-    def chunked(cls, identifiers: list[str]):
-        '''Generator yielding (identifier, loaded_data) for each identifier'''
-        # eg. data = {i: next_float32 for i, next_float32 in BinStore.chunked(['health', 'points'])}
-        # or  data_list = list(BinStore.chunked(['health', 'points']))  # (tuples)
-        for identifier in identifiers:
-            store = cls(identifier)
-            yield identifier, store.loaded
-    
-    def empty_array(self):
-        return np.zeros(self.size, dtype=self.dtype)
-    
-    def values_until_zero(self):
-        '''Generator yielding values from loaded data until first zero'''
-        for value in self.loaded:
-            if int(value) == 0:
-                break
-            yield value
-  
-    @property
-    def loaded(self):
-
-        if self.data is not None:
-            return self.data
-        
-        with self.lock:
-            try:
-                with open(self.path, "rb") as f:
-                    loaded = np.fromfile(f, dtype=self.dtype, count=self.size)
-            except FileNotFoundError:
-                empty_array = self.empty_array()
-                self.data = empty_array
-                return self.data
-            except Exception:
-                raise
-
-        self.data = loaded
-        return loaded
-    
-    # data = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=np.float32)
-    def write(self, arr: np.ndarray):
-        arr = np.asarray(arr, dtype=self.dtype).ravel()
-
-        if arr.size > self.size:
-            raise ValueError(f"Expected {self.size} elements, got {arr.size}")
-
-        if arr.size < self.size:
-            padded = np.zeros(self.size, dtype=self.dtype)
-            padded[:arr.size] = arr
-            arr = padded
-
-        if not np.array_equal(self.data, arr):
-            with self.lock:
-                with open(self.path, "wb") as f:
-                    arr.tofile(f)
-            self.data = arr
