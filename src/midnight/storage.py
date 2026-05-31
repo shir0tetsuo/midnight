@@ -90,14 +90,14 @@ class Log(Store):
             self.logger.propagate = False
 
     def Tee(self, *args, level: str = 'info', sep: str = ' ', end: str = '\n', **kwargs):
-        """Print like `print()` and also log the same message to the file.
+        '''Print like `print()` and also log the same message to the file.
 
         Parameters:
         - *args: values to be printed/logged (joined by `sep`).
         - level: logging level to use (info, debug, warning, error, critical).
         - sep, end, flush: same semantics as `print()`.
         - **kwargs: additional keyword args forwarded to `print()`.
-        """
+        '''
         # Format the message
         msg = sep.join(str(a) for a in args)
 
@@ -143,6 +143,14 @@ class SaveFile(Store):
             else SaveFile._max_float32
         )
         return value
+
+    @property
+    def _mantissa_bits(self):
+        return 23 if self._bits == 32 else 52
+
+    @property
+    def _exponent_bits(self):
+        return 8 if self._bits == 32 else 11
 
     def __init__(
             self, 
@@ -269,6 +277,77 @@ class SaveFile(Store):
             as_int = (as_int << 1) | int(b)
         
         return uint(as_int).view(self._dtype)
+    
+    def floating_to_mantissa(
+            self,
+            value: Union[np.float32, np.float64]
+        ) -> np.ndarray:
+        '''
+        Extract mantissa bits from a floating-point value.
+
+        Returns:
+            np.ndarray[np.uint8]
+            Length 23 (float32) or 52 (float64)
+        '''
+        bits = self.floating_to_bits(value)
+
+        sign_bits = 1
+        exponent_bits = self._exponent_bits
+
+        return bits[sign_bits + exponent_bits:]
+
+
+    def mantissa_to_floating(
+            self,
+            mantissa_bits: list[Union[int, bool]],
+            sign: int = 0,
+            exponent: Optional[list[Union[int, bool]]] = None
+        ):
+        '''
+        Reconstruct a float from mantissa bits.
+
+        By default uses exponent=0 and sign=0, producing
+        a subnormal value.
+
+        Parameters
+        ----------
+        mantissa_bits
+            23 or 52 bits.
+        sign
+            0 or 1.
+        exponent
+            Exponent bit array. If None, all zeros.
+        '''
+
+        mantissa_len = self._mantissa_bits
+        exponent_len = self._exponent_bits
+
+        if len(mantissa_bits) != mantissa_len:
+            raise ValueError(
+                f"Expected {mantissa_len} mantissa bits, got {len(mantissa_bits)}"
+            )
+
+        if exponent is None:
+            exponent = [0] * exponent_len
+
+        if len(exponent) != exponent_len:
+            raise ValueError(
+                f"Expected {exponent_len} exponent bits, got {len(exponent)}"
+            )
+
+        full_bits = (
+            [int(sign)]
+            + [int(x) for x in exponent]
+            + [int(x) for x in mantissa_bits]
+        )
+
+        return self.bits_to_floating(full_bits)
+    
+    def mantissa_to_bits(self, value):
+        return self.floating_to_mantissa(value)
+
+    def bits_to_mantissa(self, bits):
+        return self.mantissa_to_floating(bits)
 
     def _get_fd(self):
         return self.path.open("r+b").fileno()
