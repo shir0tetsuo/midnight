@@ -1,5 +1,5 @@
 from typing import Tuple, Literal, Optional
-from .storage import BinStore, BitStore
+from .storage import BinStore, SaveFile
 from .ansicodes import *
 import textwrap
 import numpy as np
@@ -15,12 +15,6 @@ GAME_ELEMENTALS = [
     'COSMIC',   # 5
     'NIL'       # 6
 ]
-
-
-max_float32 = np.finfo(np.float32).max
-def random_float32():
-    value = random.random() * max_float32
-    return value
 
 class DynamicChar:
 
@@ -81,7 +75,7 @@ class PlayableNonPlayable(DynamicChar):
         self.species    = species     # in-game species number, affects rendering
         self.element    = element     # Entity Elemental Element
         self.level      = level       # Entity Level
-        self.seed       = random_float32()  # BUG TODO
+        self.seed       = SaveFile.random_float()  # BUG TODO
         self.EntityType = EntityType  # Entity Type, affects update cycles
 
         pass

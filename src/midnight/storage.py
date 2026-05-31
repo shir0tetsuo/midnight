@@ -5,6 +5,7 @@ import threading
 import platform
 from typing import Union, Optional, Literal
 import logging
+import random
 from .version import __version__
 
 class Store:
@@ -131,6 +132,17 @@ class SaveFile(Store):
             np.float64, 64, np.uint64
         )
     }
+    _max_float32 = np.finfo(np.float32).max
+    _max_float64 = np.finfo(np.float64).max
+
+    @staticmethod
+    def random_float(num_bit:Optional[Literal['32-bit', '64-bit']] = '32-bit'):
+        value = random.random() * (
+            SaveFile._max_float32 if num_bit=='32-bit'
+            else SaveFile._max_float64 if num_bit == '64-bit'
+            else SaveFile._max_float32
+        )
+        return value
 
     def __init__(
             self, 
@@ -145,7 +157,7 @@ class SaveFile(Store):
         self._size, self._dtype, self._bits, self._uint = self.cast[self.store_type]
         self._bit_shifts = np.arange(self._bits - 1, -1, -1, dtype=np.int32)
         self.data = self._open_memmap()
-    
+
     @property
     def header(self):
         h = (
@@ -182,7 +194,7 @@ class SaveFile(Store):
                 return data
 
             # Validate existing file
-            
+
             actual_size = self.size_bytes
             if actual_size != expected_size:
                 raise ValueError(
