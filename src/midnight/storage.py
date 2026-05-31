@@ -140,10 +140,10 @@ class SaveFile(Store):
         super().__init__(identifier, suffix='.bin')
         
         self.store_type = store_type
-        
+
         # size, dtype, bits, uint
         self._size, self._dtype, self._bits, self._uint = self.cast[self.store_type]
-        self._bit_shifts = np.arange(self._bits - 1, -1, -1, dtype=self._uint)
+        self._bit_shifts = np.arange(self._bits - 1, -1, -1, dtype=np.int32)
         self.data = self._open_memmap()
     
     @property
@@ -157,14 +157,17 @@ class SaveFile(Store):
         return h.ljust(self.HEADER_SIZE, b"\x00")
 
     def _open_memmap(self):
-        expected_size = self.HEADER_SIZE + self._size * np.dtype(self._dtype).itemsize
-        actual_size = self.size_bytes
+
+        expected_size = (
+            self.HEADER_SIZE +
+            self._size * np.dtype(self._dtype).itemsize
+        )
 
         with self.lock:
-            # not exists: Header/Zero flush
             if not self.exists:
                 with open(self.path, "wb") as f:
                     f.write(self.header)
+                    f.truncate(expected_size)
 
                 data = np.memmap(
                     self.path,
@@ -174,31 +177,39 @@ class SaveFile(Store):
                     shape=(self._size,)
                 )
 
-                f.truncate(expected_size)
-                # os.fsync(self.data._mmap.fileno())
                 data.flush()
+
                 return data
 
-            with open(self.path, "rb") as f:
-                header = f.read(self.HEADER_SIZE)
-
-            decoded_header = header.decode('utf-8', errors='replace')
-
-            if not header.startswith(b'MID.NIGHTMOONBEAM'):
-                raise ValueError(f"Bad header: {self.path}: {str(decoded_header)}")
-
-            parts = decoded_header.strip("\x00").split("_")
-            if len(parts) < 3:
-                raise ValueError("Corrupt header (sum parts not 3)")
+            # Validate existing file
             
-            if self.store_type not in decoded_header:
-                raise TypeError(f'store type {self.store_type} but file is not.')
-
+            actual_size = self.size_bytes
             if actual_size != expected_size:
                 raise ValueError(
                     f"Invalid file size: expected {expected_size}, got {actual_size}"
                 )
-            
+
+            with open(self.path, "rb") as f:
+                header = f.read(self.HEADER_SIZE)
+
+            decoded = header.decode("utf-8", errors="replace").rstrip("\x00")
+
+            # Fast prefix check (cheap reject)
+            if not header.startswith(b"MID.NIGHTMOONBEAM_"):
+                raise ValueError(f"Bad header magic: {decoded}")
+
+            # Structured parse (safe + stable)
+            parts = decoded.split("_")
+            if len(parts) < 3:
+                raise ValueError("Corrupt header (invalid format)")
+
+            _, version, dtype_tag = parts[:3]
+
+            if dtype_tag != self.store_type:
+                raise TypeError(
+                    f"Store type mismatch: expected {self.store_type}, got {dtype_tag}"
+                )
+
             return np.memmap(
                 self.path,
                 dtype=self._dtype,
@@ -213,12 +224,11 @@ class SaveFile(Store):
                 int, float, bool, np.integer, np.floating, np.bool_
             ]
         ) -> Union[np.float32, np.float64]:
-        return value if isinstance(value, self._dtype) else self._dtype(value)
-        # cv = self._dtype(value)
-        # if not np.isfinite(cv):
-        #     raise ValueError(f"Cannot align value to {self._dtype}: {value}")
-        # return cv
-    
+        if isinstance(value, self._dtype):
+            return value
+        cv = self._dtype(value)
+        return cv if np.isfinite(cv) else (_ for _ in ()).throw(ValueError(f"Cannot align value to {self._dtype}: {value}"))
+        
     def poke(
             self, index:int, value:Union[
                 int, float, bool, np.integer, np.floating, np.bool_
@@ -248,11 +258,17 @@ class SaveFile(Store):
         
         return uint(as_int).view(self._dtype)
 
+    def _get_fd(self):
+        return self.path.open("r+b").fileno()
 
-    def flush(self):
+
+    def flush(self, fsync:bool=False):
         with self.lock:
             try:
                 self.data.flush()
+                if fsync:
+                    with open(self.path, "r+b") as f:
+                        os.fsync(f.fileno())
             except Exception as e:
                 raise IOError(f'Failed to flush SaveFile {self.path}: {type(e)}: {e}')
 
