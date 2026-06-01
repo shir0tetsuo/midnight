@@ -16,6 +16,10 @@ class Notification:
         :param t: Number of seconds to render the notification. 
             `-1` will render until cleared.
         :type t: Integer
+        :param expression: The symbol to render in the notification
+            on the left side before the text. The default will render
+            like: `[!] ...` for the default `'!'`
+        :type expression: String (single character)
 
         ---
         

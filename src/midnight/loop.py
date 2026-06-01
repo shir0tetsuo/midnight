@@ -1,6 +1,7 @@
 import time
 import traceback
-from .storage import BinStore, Log
+from .storage import Log
+from .buffer import TerminalBuffer
 from .bootstrap import bootctl
 from .ansicodes import *
 from .keymap import main_keymap
@@ -8,13 +9,9 @@ from .entity import Player
 from .notification import Notification
 from typing import Union, Optional
 import numpy as np
-import textwrap
 import shutil
 import sys
-import atexit
-import termios
 from datetime import datetime
-import signal
 import os
 import select
 
@@ -26,11 +23,11 @@ class GameLoop:
     def __init__(self, bctl:bootctl):
 
         self.bctl = bctl                        # Boot Control
-        self.Log:Optional[Log] = None
+        self.Log:Optional[Log] = None           # Log will only init after game start
         self.debugmode = False                  # Special Debugging Flag
         self.Player:Optional[Player] = None     # Lazy Player Container
 
-        # Logic Control Variables
+        # Logic Control Variables----------------
         self.running        = True              # False -> EXIT
         self.start_frame    = True              # If start frame, init top bar ui
         self.enter_pressed  = False             # If ENTER is pressed -> action
@@ -38,12 +35,9 @@ class GameLoop:
         self.ui_delta       = 0.0               # Every int()+1 -> get time, update ui
         self.selected:tuple[int, int] = (0, 0)  # row, col selected in select screens
 
-        # Render Elements
-        self._ui_elements = None            # diff check
-        self.ui_elements  = []              # Actual UI element codes to render
-        self._buffer      = None            # diff check
-        self.buffer       = []              # Actual SCREEN codes to render
-        self.Notification = Notification()  # Notification System
+        # Render Elements ----------------------------
+        self.UIElements   = TerminalBuffer()    # UI Elements rendered overtop
+        self.Notification = Notification()      # Notification System
 
         # Terminal rows, columns system
         self.rows, self.cols = self._yx()
@@ -80,32 +74,22 @@ class GameLoop:
         return self._yx_quarter
     
     def _input_poll(self) -> set[str]:
-
         keys = set()
-
         while True:
-
-            ready, _, _ = select.select(
-                [sys.stdin],
-                [],
-                [],
-                0
-            )
-
+            # Non-Blocking poll of stdin
+            ready, _, _ = select.select([sys.stdin],[],[],0)
             if not ready:
                 break
-
+            # Read up to 32 bytes from the terminal file descriptor
             data = os.read(self.bctl.fd, 32)
-
             if not data:
                 break
-
+            # Check the keymap for relevant keys pressed
             if data in GameLoop.KEYMAP:
                 keys.add(GameLoop.KEYMAP[data])
-
+            # Return the raw data to the map
             else:
                 keys.add(repr(data))
-
         return keys
 
     def _update_ui_bar(self, timestamp:str):
@@ -121,7 +105,8 @@ class GameLoop:
             f" MIDNIGHT 0.0.0 {timestamp}"
         )[:(self.cols-1-len(ui_top_note))]
 
-        self.ui_elements = [
+        # Resets the UI Elements buffer
+        self.UIElements.primary = [
             (
                 CURSORTOTOPLEFT,
                 CLEARLINE,
@@ -258,7 +243,7 @@ class GameLoop:
     def _render_MAINMENU(self):
 
         # Keep only the top bar, clear gamestate elements from previous frame
-        self.ui_elements = self.ui_elements[:1] if len(self.ui_elements) > 0 else []
+        self.UIElements.primary = self.UIElements.primary[:1] if len(self.UIElements.primary) > 0 else []
 
         default_sel = ' -------- '
 
@@ -267,7 +252,7 @@ class GameLoop:
             (0,0): ' (1/2) CONTINUE / NEW GAME ',  # should be conditional
             (0,1): ' (2/2) NEW GAME '
         }.get(self.selected, default_sel)
-        self.ui_elements.append(
+        self.UIElements.primary.append(
             (
                 Cursor(3, 2),
                 REVERSEVIDEO,
@@ -281,7 +266,7 @@ class GameLoop:
             (1,0): ' (1/1) SETTINGS ',
             (1,1): ' (1/1) SETTINGS '
         }.get(self.selected, default_sel)
-        self.ui_elements.append(
+        self.UIElements.primary.append(
             (
                 Cursor(4, 2),
                 REVERSEVIDEO,
@@ -295,7 +280,7 @@ class GameLoop:
             (2,0): ' (1/2) BUILD ',
             (2,1): (f' (2/2) [{('X' if self.debugmode else ' ')}] DEBUG ')
         }.get(self.selected, default_sel)
-        self.ui_elements.append(
+        self.UIElements.primary.append(
             (
                 Cursor(5,2),
                 REVERSEVIDEO,
@@ -306,7 +291,7 @@ class GameLoop:
         )
 
         line4 = ' [ENTER/SPACE] '
-        self.ui_elements.append(
+        self.UIElements.primary.append(
             (
                 # Make sure Line 2 is clear
                 Cursor(2, 0),
@@ -324,10 +309,10 @@ class GameLoop:
 
         # Clear all notification lines (from row 7 to bottom, including rows-1)
         for row in range(7, self.rows):
-            self.ui_elements.append((Cursor(row, 0), CLEARLINE))
+            self.UIElements.primary.append((Cursor(row, 0), CLEARLINE))
 
         # Re-add the ENTER/SPACE line after clearing to ensure it renders on top
-        self.ui_elements.append(
+        self.UIElements.primary.append(
             (
                 Cursor(self.rows-1, 2),
                 BOLD,
@@ -338,18 +323,9 @@ class GameLoop:
         )
 
         if self.Notification.display:
-            self.ui_elements.append(self.Notification.ui_elements((self.rows, self.cols), self.yx_center))
+            self.UIElements.primary.append(self.Notification.ui_elements((self.rows, self.cols), self.yx_center))
 
         return False
-
-    def _ruiel(self):
-        '''Render UI Elements with Write'''
-        self._ui_elements = self.ui_elements.copy()
-        for ui_element in self.ui_elements:
-            Write(*ui_element)
-        # TODO : Flush for diff in render scr elements
-        return
-    
 
     # ---- PRIMARY RENDER CONTROLLER ----
     def render(self):
@@ -372,16 +348,15 @@ class GameLoop:
         except Exception:
             raise
 
-        # Render UI Elements
-        if ((self._ui_elements or []) != self.ui_elements) or do_flush:
-            self._ruiel()
+        # Render UI Elements if the diff check mismatches the primary
+        if (self.UIElements.is_different) or do_flush:
+            self.UIElements.flush()
             do_flush = True
             
         return (Flush() if do_flush else None)  # Proceed without drawing
     
 
-    # --- TO RUN THIS APPLICATION ---
-
+    ## ---- RUN ---- ############################
     def _run(self):
         last = time.perf_counter()
         try:
@@ -389,29 +364,23 @@ class GameLoop:
                 now = time.perf_counter()
                 dt = now - last  # delta time
                 last = now
-
                 self.update(dt)
                 self.render()
-
                 time.sleep(0.016)  # ~60 FPS
-
         # Main Exception Traceback
         except Exception as exc:
             self.running = False
             print(f"\n❌ {exc}")
             traceback.print_exc()
             raise
-
         return
     
     @staticmethod
     def start():
         '''Execute run loop.'''
-        
         try: # Run main application
-            with bootctl() as bctl: 
-                GameLoop(bctl)._run()
-        
+            with bootctl() as game_boot_controller: 
+                GameLoop(game_boot_controller)._run()
         except Exception as exc:
             print(exc)
             traceback.print_exc()
