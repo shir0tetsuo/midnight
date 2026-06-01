@@ -4,15 +4,13 @@ from .maps import maps_directory
 from .signature import MachineSignature
 import os
 #from 
-from typing import Literal
+from typing import Literal, Optional
 import numpy as np
 from datetime import datetime, timezone
 
 
 
 class BuiltMap(Store):
-
-    M_SIG = MachineSignature.Fingerprint()
 
     HEADER_SIZE = 128
 
@@ -64,6 +62,7 @@ class BuiltMap(Store):
         # NOTE : Warps will be defined by the tile type.
 
         self.MapType = MapType
+        self.MagicHeader: Optional[np.memmap] = None
         self.data = self._open_memmap()
 
         pass
@@ -153,6 +152,9 @@ class BuiltMap(Store):
                     f"Store type mismatch: Expected {self.store_type}, got {_dtype_tag}"
                 )
             
+            MAP_SIZE = magic_header[BuiltMap.FHeaderSchema.MAP_SIZE]
+            expected_size = int(np.nan_to_num(MAP_SIZE[0], nan=128)) * int(np.nan_to_num(MAP_SIZE[1], nan=128))
+
             actual_size = self.size_bytes
 
             expected_file_size = (
@@ -167,12 +169,13 @@ class BuiltMap(Store):
                     f"expected {expected_file_size}, got {actual_size}"
                 )
 
-            MAP_SIZE=magic_header[BuiltMap.FHeaderSchema.MAP_SIZE]
-            sec,frac=magic_header[BuiltMap.FHeaderSchema.TIMESTAMP]
-            self.created = datetime.fromtimestamp(float(self.combine_float32(sec,frac)), tz=timezone.utc)
-            self.__M_SIG=magic_header[BuiltMap.FHeaderSchema.M_SIG]
+            sec, frac = magic_header[BuiltMap.FHeaderSchema.TIMESTAMP]
+            self.created = datetime.fromtimestamp(
+                float(self.combine_float32(sec, frac)),
+                tz=timezone.utc
+            )
 
-            expected_size = int(MAP_SIZE[0]) * int(MAP_SIZE[1])
+            self.__M_SIG = magic_header[BuiltMap.FHeaderSchema.M_SIG]
             
             return np.memmap(
                 self.path,
@@ -184,11 +187,16 @@ class BuiltMap(Store):
         
     @property
     def is_file_authority(self):
+        if self.__M_SIG is None:
+            return False
+        
+        M_SIG = MachineSignature.Fingerprint()
+
         return np.array_equal(
-            BuiltMap.M_SIG.view('<u4'),
+            M_SIG.view('<u4'),
             self.__M_SIG.view('<u4')
         )
-
+       
     def _get_fd(self):
         return self.path.open("r+b").fileno()
 
