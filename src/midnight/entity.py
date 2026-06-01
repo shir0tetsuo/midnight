@@ -27,25 +27,10 @@ class Entity(Dynamic):
         self._HP_aura, self._HP_core = HP
 
     @property 
-    def data(self):
+    def as_kwargs(self):
         return  {
             'yx': self.yx,
             'ID': self.ID,
             'LVL': self.LVL,
             'HP': (self._HP_aura, self._HP_core)
         }
-
-#     @property
-#     def debug(self):
-#         return {
-#             'yx':self.yx,'name':self.name,
-#             'hp':self.hp,'stat':self.status,
-#             'species':self.species,
-#             'element':self.element,
-#             'lvl':self.level,
-#             'seed':self.seed,
-#             'EntityType':self.EntityType,
-#             'dc': {
-#                 'chars':self.chars, 'colors':self.colors
-#             }
-#         }
