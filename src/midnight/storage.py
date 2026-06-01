@@ -21,6 +21,7 @@ class Store:
         :param identifier: The storage identifier (name of the file), no suffix.
         '''
         self.lock = threading.RLock()
+        self.suffix = suffix
 
         # Get system, path
         self._system.setdefault('system', platform.system())

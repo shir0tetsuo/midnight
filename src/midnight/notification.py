@@ -33,6 +33,7 @@ class Notification:
         self.expression = expression
         self.dt:float = None
         self.t = t
+        self.color = REVERSEVIDEO
         pass
     
     def update(self, dt):
@@ -64,7 +65,7 @@ class Notification:
             if i>0:
                 _c.append((Cursor(diff, 2), line))
             else:
-                _c.append((Cursor(diff, 2), REVERSEVIDEO, ' ', line))
+                _c.append((Cursor(diff, 2), self.color, ' ', line))
         
         flat = []
         for item in _c:

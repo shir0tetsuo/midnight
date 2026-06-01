@@ -5,7 +5,7 @@ from .buffer import TerminalBuffer
 from .bootstrap import bootctl
 from .ansicodes import *
 from .keymap import main_keymap
-from .entity import Player
+from .entity import Entity
 from .notification import Notification
 from typing import Union, Optional
 import numpy as np
@@ -25,7 +25,7 @@ class GameLoop:
         self.bctl = bctl                        # Boot Control
         self.Log:Optional[Log] = None           # Log will only init after game start
         self.debugmode = False                  # Special Debugging Flag
-        self.Player:Optional[Player] = None     # Lazy Player Container
+        self.Player:Optional[Entity] = None     # Lazy Player Container
 
         # Logic Control Variables----------------
         self.running        = True              # False -> EXIT
@@ -72,7 +72,8 @@ class GameLoop:
 
         self._yx_quarter = (int(self.rows/4), int(self.cols/4))
         return self._yx_quarter
-    
+
+
     def _input_poll(self) -> set[str]:
         keys = set()
         while True:
@@ -137,7 +138,7 @@ class GameLoop:
         self.Notification = Notification('Loading...', t=-1)
 
         self.Log = Log('debugging')
-        self.Player = Player((0,0))
+        self.Player = Entity()
         # Write(CLEAR)
         # Flush()
         

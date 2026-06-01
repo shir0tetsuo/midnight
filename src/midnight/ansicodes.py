@@ -41,11 +41,15 @@ def Cursor(y_row: int, x_col: int):
     if x_col <=0: x_col = 1
     return f'\033[{y_row};{x_col}H'
 
+def SimpleColor(color_code: int):
+    return f"\033[38;5;${color_code}m"
+
 def Color(
-        text: str, 
+        text: Optional[str] = None, 
         fg_hex: Optional[str] = None, 
         bg_hex: Optional[str] = None, 
-        reset: bool = True
+        reset: bool = True,
+        color_only: bool = False
     ) -> str:
     '''
     Return text formatted with ANSI truecolor codes using hex colors.
@@ -78,6 +82,10 @@ def Color(
         codes.append(f"\033[48;2;{r};{g};{b}m")
 
     start = "".join(codes)
+
+    if color_only:
+        return start
+
     end = RESETFORMATTING if reset else ""
 
     return f"{start}{text}{end}"
