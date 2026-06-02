@@ -27,18 +27,18 @@ class BuiltMap(Store):
 
     @staticmethod
     def split_float64(x):
-        hi = np.float32(x)
-        lo = np.float32(x - np.float64(hi))
+        hi = np.dtype('<f4')(x)
+        lo = np.dtype('<f4')(x - np.float64(hi))
         return hi, lo
 
     @staticmethod
-    def combine_float32(hi, lo):
+    def combine_float32_or_f4(hi, lo):
         return np.float64(hi) + np.float64(lo)
 
     @staticmethod
     def split_timestamp(ts):
-        sec = np.float32(int(ts))
-        frac = np.float32(ts - int(ts))
+        sec = np.dtype('<f4')(int(ts))
+        frac = np.dtype('<f4')(ts - int(ts))
         return sec, frac
 
     def __init__(
@@ -112,7 +112,8 @@ class BuiltMap(Store):
 
                 expected_size = int(MAP_SIZE[0]) * int(MAP_SIZE[1])
                 expected_size_bytes = (
-                    expected_size * np.dtype(np.float32).itemsize
+                    expected_size * np.dtype('<f4').itemsize
+                    # expected_size * np.dtype(np.float32).itemsize
                 )
 
                 # Write the expected 128*128 bytes flushed as \x00
@@ -153,6 +154,7 @@ class BuiltMap(Store):
                 )
             
             MAP_SIZE = magic_header[BuiltMap.FHeaderSchema.MAP_SIZE]
+            
             expected_size = int(np.nan_to_num(MAP_SIZE[0], nan=128)) * int(np.nan_to_num(MAP_SIZE[1], nan=128))
 
             actual_size = self.size_bytes
@@ -160,7 +162,7 @@ class BuiltMap(Store):
             expected_file_size = (
                 self.HEADER_SIZE +
                 BuiltMap.FHeaderSchema._F_SIZE +
-                expected_size * np.dtype(np.float32).itemsize
+                expected_size * np.dtype('<f4').itemsize
             )
 
             if actual_size != expected_file_size:
@@ -171,7 +173,7 @@ class BuiltMap(Store):
 
             sec, frac = magic_header[BuiltMap.FHeaderSchema.TIMESTAMP]
             self.created = datetime.fromtimestamp(
-                float(self.combine_float32(sec, frac)),
+                float(self.combine_float32_or_f4(sec, frac)),
                 tz=timezone.utc
             )
 
@@ -193,8 +195,8 @@ class BuiltMap(Store):
         M_SIG = MachineSignature.Fingerprint()
 
         return np.array_equal(
-            M_SIG.view('<u4'),
-            self.__M_SIG.view('<u4')
+            np.asarray(M_SIG, dtype='<u4'),
+            np.asarray(self.__M_SIG, dtype='<u4')
         )
        
     def _get_fd(self):
