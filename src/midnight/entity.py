@@ -1,5 +1,4 @@
 from typing import Tuple, Literal, Optional, Union
-from .storage import SaveFile
 from .ansicodes import *
 from .buffer import Dynamic
 import numpy as np

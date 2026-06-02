@@ -1,6 +1,6 @@
 import time
 import traceback
-from .storage import Log
+from .log import Log
 from .buffer import TerminalBuffer
 from .bootstrap import bootctl
 from .ansicodes import *

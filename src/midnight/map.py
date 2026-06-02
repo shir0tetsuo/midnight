@@ -1,4 +1,4 @@
-from .storage import Store
+from ._storage import Store
 from .version import __version__
 from .maps import maps_directory
 from .signature import MachineSignature
@@ -263,5 +263,5 @@ class BuiltMap(Store):
                     with open(self.path, "r+b") as f:
                         os.fsync(f.fileno())
             except Exception as e:
-                raise IOError(f'Failed to flush SaveFile {self.path}: {type(e)}: {e}')
+                raise IOError(f'Failed to flush Map File {self.path}: {type(e)}: {e}')
 
