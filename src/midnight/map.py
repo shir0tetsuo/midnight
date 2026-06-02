@@ -12,14 +12,25 @@ from datetime import datetime, timezone
 
 class BuiltMap(Store):
 
+    # NOTE : Warps will be defined by the tile type.
+
+    class BadHeaderError(Exception):
+        '''
+        Indicates something went wrong when parsing the header or magic header data.
+        '''
+        def __init__(self, *message):
+            super().__init__(*message)
+
     HEADER_SIZE = 128
+    '''The size of the file header in bytes before the magic header.'''
 
     class FHeaderSchema:
+        '''Holds slices and number of floats for the magic header.'''
         M_SIG = slice(0,8)
+        '''Machine Signature'''
         TIMESTAMP = slice(8,10)
         MAP_SIZE = slice(10,12)
 
-        DEFAULT_MAP_SIZE = np.float32(128.0) # np.dtype('<f4')(128)
         _FLOATS = 12
         _F_SIZE = _FLOATS*np.dtype('<f4').itemsize  # bytes
     
@@ -27,8 +38,8 @@ class BuiltMap(Store):
 
     @staticmethod
     def split_float64(x):
-        hi = np.dtype('<f4')(x)
-        lo = np.dtype('<f4')(x - np.float64(hi))
+        hi = np.dtype('<f4').type(x)
+        lo = np.dtype('<f4').type(x - np.float64(hi))
         return hi, lo
 
     @staticmethod
@@ -37,14 +48,15 @@ class BuiltMap(Store):
 
     @staticmethod
     def split_timestamp(ts):
-        sec = np.dtype('<f4')(int(ts))
-        frac = np.dtype('<f4')(ts - int(ts))
+        sec = np.dtype('<f4').type(int(ts))
+        frac = np.dtype('<f4').type(ts - int(ts))
         return sec, frac
 
     def __init__(
             self, 
             identifier:str,
-            MapType: Literal['local', 'built-in', 'dungeon'] = 'built-in'
+            MapType: Literal['local', 'built-in', 'dungeon'] = 'built-in',
+            NewMapSize: tuple[int, int] = (128, 128)
         ):
         super().__init__(identifier=identifier, suffix='.map.bin')
 
@@ -59,7 +71,10 @@ class BuiltMap(Store):
 
         self.created = None  # Timestamp of created for file (original)
 
-        # NOTE : Warps will be defined by the tile type.
+        # New Map Coordinates (applies to new maps only)
+        self.NewMap_y, self.NewMap_x = NewMapSize
+        self.NewMap_y_f32 = np.dtype('<f4').type(self.NewMap_y)
+        self.NewMap_x_f32 = np.dtype('<f4').type(self.NewMap_x)
 
         self.MapType = MapType
         self.MagicHeader: Optional[np.memmap] = None
@@ -100,8 +115,8 @@ class BuiltMap(Store):
                     shape=(BuiltMap.FHeaderSchema._FLOATS,)
                 )
                 MAP_SIZE=magic_header[BuiltMap.FHeaderSchema.MAP_SIZE]
-                MAP_SIZE[0] = BuiltMap.FHeaderSchema.DEFAULT_MAP_SIZE
-                MAP_SIZE[1] = BuiltMap.FHeaderSchema.DEFAULT_MAP_SIZE
+                MAP_SIZE[0] = self.NewMap_y_f32
+                MAP_SIZE[1] = self.NewMap_x_f32
 
                 sec, frac = BuiltMap.split_timestamp(datetime.now(timezone.utc).timestamp())
                 magic_header[BuiltMap.FHeaderSchema.TIMESTAMP] = (sec, frac)
@@ -129,6 +144,7 @@ class BuiltMap(Store):
                     shape=(BuiltMap.FHeaderSchema._FLOATS,)
                 )
 
+            # Return the magic header
             self.MagicHeader = magic_header
 
             # Validation
@@ -139,46 +155,55 @@ class BuiltMap(Store):
 
             # Fast prefix check (cheap reject)
             if not header.startswith(b"MID.NIGHTMOONBEAM_"):
-                raise ValueError(f"Bad header magic: {decoded}")
+                raise BuiltMap.BadHeaderError(f"Bad header magic: {decoded}")
             
+            # Obtain decoded parts from the header
             parts = decoded.split("_")
 
             if len(parts) < 5:
-                raise ValueError("Corrupt header (invalid format)")
+                raise BuiltMap.BadHeaderError("Corrupt header (invalid format)")
             
+            # Check the header to make sure the dtype and maptype is correct
             _, _version, _dtype_tag, _map_type, _identifier = parts[:5]
 
             if _dtype_tag != self.store_type:
-                raise TypeError(
+                raise BuiltMap.BadHeaderError(
                     f"Store type mismatch: Expected {self.store_type}, got {_dtype_tag}"
                 )
+            if _map_type != self.MapType:
+                raise BuiltMap.BadHeaderError(f'Map type is {_map_type}, but instance is {self.MapType}')
             
             MAP_SIZE = magic_header[BuiltMap.FHeaderSchema.MAP_SIZE]
             
-            expected_size = int(np.nan_to_num(MAP_SIZE[0], nan=128)) * int(np.nan_to_num(MAP_SIZE[1], nan=128))
-
-            actual_size = self.size_bytes
-
+            # Get the expected and actual size of bytes and compare
+            expected_size = (
+                int(   np.nan_to_num(MAP_SIZE[0], nan=self.NewMap_y) ) 
+                * int( np.nan_to_num(MAP_SIZE[1], nan=self.NewMap_x) )
+            )
+            actual_size   = self.size_bytes
             expected_file_size = (
                 self.HEADER_SIZE +
                 BuiltMap.FHeaderSchema._F_SIZE +
                 expected_size * np.dtype('<f4').itemsize
             )
-
             if actual_size != expected_file_size:
-                raise ValueError(
+                raise BuiltMap.BadHeaderError(
                     f"Invalid map file size: "
                     f"expected {expected_file_size}, got {actual_size}"
                 )
 
+            # Get the timestamp, convert to a datetime object
+            # and put in self.created for ease of reference
             sec, frac = magic_header[BuiltMap.FHeaderSchema.TIMESTAMP]
             self.created = datetime.fromtimestamp(
                 float(self.combine_float32_or_f4(sec, frac)),
                 tz=timezone.utc
             )
 
+            # Copy magic header machine signature to internal mangled
             self.__M_SIG = magic_header[BuiltMap.FHeaderSchema.M_SIG]
             
+            # Return the data memmap
             return np.memmap(
                 self.path,
                 dtype=np.dtype('<f4'),
@@ -193,10 +218,9 @@ class BuiltMap(Store):
             return False
         
         M_SIG = MachineSignature.Fingerprint()
-
         return np.array_equal(
-            np.asarray(M_SIG, dtype='<u4'),
-            np.asarray(self.__M_SIG, dtype='<u4')
+            np.asarray(M_SIG).view('<u4'),
+            np.asarray(self.__M_SIG).view('<u4')
         )
        
     def _get_fd(self):
