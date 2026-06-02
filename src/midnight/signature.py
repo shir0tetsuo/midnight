@@ -26,8 +26,8 @@ class MachineSignature:
         fingerprint = hashlib.sha256(data.encode()).digest()
         
         parts = np.frombuffer(fingerprint, dtype='<u4')
-        ff = parts.view('<f4')
-        
-        MachineSignature._MACHINE_ID = ff.copy()
+
+        # Return a read-only uint32 view of the fingerprint bytes
+        MachineSignature._MACHINE_ID = parts.copy()
         MachineSignature._MACHINE_ID.setflags(write=False)
         return MachineSignature._MACHINE_ID
